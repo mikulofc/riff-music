@@ -1,0 +1,18 @@
+name = "sheet-music-viewer"
+main = "src/worker.ts"
+compatibility_date = "2026-01-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "sheet-music-db"
+database_id = "ea3894fe-3602-4d18-8691-4a91995fa78c"
+
+[assets]
+directory = "./dist"
+html_handling = "auto-trailing-slash"
+
+# Set via: wrangler secret put GOOGLE_CLIENT_SECRET
+# Set via: wrangler secret put RESEND_API_KEY
+[vars]
+GOOGLE_CLIENT_ID = "526761198377-b8f6rdlapmtp6chb39jrvb4297p05hpt.apps.googleusercontent.com"
+APP_URL = "https://riffmusic.app"

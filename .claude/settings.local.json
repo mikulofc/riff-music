@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(netstat:*)",
+      "Bash(findstr:*)",
+      "Bash(taskkill:*)",
+      "Bash(npm run deploy:*)",
+      "Bash(git -C c:/Users/micha/sheet-music-viewer init)",
+      "Bash(git -C c:/Users/micha/sheet-music-viewer add -A)",
+      "Bash(git -C c:/Users/micha/sheet-music-viewer status:*)",
+      "Bash(git -C c:/Users/micha/sheet-music-viewer rm:*)"
+    ]
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "name": "sheet-music-viewer",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite build && wrangler dev",
+    "dev:frontend": "vite",
+    "build": "tsc -p tsconfig.json && vite build",
+    "preview": "vite preview",
+    "deploy": "npm run build && wrangler deploy"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260131.0",
+    "typescript": "~5.9.3",
+    "vite": "^7.2.4",
+    "vite-plugin-top-level-await": "^1.6.0",
+    "vite-plugin-wasm": "^3.5.0",
+    "wrangler": "^4.61.1"
+  },
+  "dependencies": {
+    "hono": "^4.11.7",
+    "tone": "^15.1.22",
+    "verovio": "^6.0.1"
+  }
+}
