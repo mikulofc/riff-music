@@ -322,6 +322,29 @@ body {
   border-color: var(--border-interactive);
 }
 
+.score-card-thumb {
+  width: 100%;
+  aspect-ratio: 1;
+  overflow: hidden;
+  background: var(--bg-input);
+}
+
+.score-card-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.score-card-image-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 3rem;
+  color: var(--text-dim);
+}
+
 .score-card-body {
   padding: 20px;
 }
@@ -332,9 +355,19 @@ body {
   margin-bottom: 4px;
 }
 
+.score-author {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-bottom: 2px;
+}
+
 .score-date {
   font-size: 0.8rem;
   color: var(--text-dim);
+}
+
+.library-section {
+  margin-top: 40px;
 }
 
 .score-card-actions {
@@ -361,6 +394,16 @@ body {
   background: var(--border-interactive);
 }
 
+.btn-publish {
+  background: transparent;
+  color: var(--accent);
+  border-right: 1px solid var(--border) !important;
+}
+
+.btn-publish:hover {
+  background: rgba(155, 125, 212, 0.1);
+}
+
 .btn-delete {
   background: transparent;
   color: #e94560;
@@ -368,6 +411,21 @@ body {
 
 .btn-delete:hover {
   background: rgba(233, 69, 96, 0.1);
+}
+
+.btn-edit {
+  padding: 6px 14px;
+  font-size: 0.8rem;
+}
+
+.btn-view-public {
+  background: var(--bg-input);
+  color: var(--text);
+  flex: 1;
+}
+
+.btn-view-public:hover {
+  background: var(--border-interactive);
 }
 
 .btn-primary {
@@ -424,12 +482,14 @@ body {
   padding: 12px 24px;
   background: var(--bg-input);
   border-bottom: 1px solid var(--border-interactive);
+  flex-wrap: wrap;
 }
 
 .save-fields {
   display: flex;
   flex: 1;
   gap: 8px;
+  min-width: 0;
 }
 
 .save-bar input {
@@ -454,6 +514,43 @@ body {
 
 .save-bar input::placeholder {
   color: var(--text-dim);
+}
+
+/* Album image upload in save bar */
+.album-image-upload {
+  flex-shrink: 0;
+}
+
+.album-image-upload input[type='file'] {
+  display: none;
+}
+
+.album-image-label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 6px;
+  border: 2px dashed var(--border-interactive);
+  cursor: pointer;
+  overflow: hidden;
+  transition: border-color 0.2s;
+}
+
+.album-image-label:hover {
+  border-color: var(--accent);
+}
+
+.album-image-placeholder {
+  font-size: 1.25rem;
+  color: var(--text-dim);
+}
+
+.album-image-preview {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 /* ===== SHARED VIEWER/TOOLBAR STYLES ===== */
@@ -614,6 +711,16 @@ button:disabled {
   background: var(--sheet-drag);
   outline: 3px dashed var(--border-interactive);
   outline-offset: -10px;
+}
+
+.bulk-progress {
+  text-align: center;
+  padding: 80px 20px;
+  color: var(--text-muted);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
 }
 
 #sheet-music .placeholder,
@@ -786,5 +893,22 @@ button:disabled {
 
   .score-grid {
     grid-template-columns: 1fr;
+  }
+
+  .save-bar {
+    padding: 10px 16px;
+  }
+
+  .save-fields {
+    flex-wrap: wrap;
+    flex-basis: 100%;
+  }
+
+  .save-fields input {
+    flex-basis: calc(50% - 4px);
+  }
+
+  .save-fields #score-title {
+    flex-basis: 100%;
   }
 }

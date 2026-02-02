@@ -7,6 +7,7 @@ export interface User {
 export interface ScoreSummary {
   id: string;
   title: string;
+  album_image: string | null;
   created_at: string;
 }
 
@@ -62,11 +63,11 @@ export async function getScores(): Promise<ScoreSummary[]> {
   return data.scores;
 }
 
-export async function saveScore(title: string, musicxml: string): Promise<{ id: string }> {
+export async function saveScore(title: string, musicxml: string, albumImage?: string | null): Promise<{ id: string }> {
   const res = await fetch('/api/scores', {
     method: 'POST',
     headers,
-    body: JSON.stringify({ title, musicxml }),
+    body: JSON.stringify({ title, musicxml, album_image: albumImage || null }),
     ...opts,
   });
   return res.json() as Promise<{ id: string }>;
@@ -79,7 +80,30 @@ export async function getScore(id: string): Promise<ScoreFull | null> {
   return data.score;
 }
 
+export async function updateScore(id: string, data: { title?: string; musicxml?: string; album_image?: string | null }): Promise<void> {
+  await fetch(`/api/scores/${id}`, {
+    method: 'PUT',
+    headers,
+    body: JSON.stringify(data),
+    ...opts,
+  });
+}
+
 export async function deleteScore(id: string): Promise<boolean> {
   const res = await fetch(`/api/scores/${id}`, { method: 'DELETE', ...opts });
   return res.ok;
+}
+
+export async function getPublicScores(): Promise<ScoreSummary[]> {
+  const res = await fetch('/api/scores/public', opts);
+  const data = (await res.json()) as { scores: ScoreSummary[] };
+  return data.scores;
+}
+
+export async function publishScore(id: string): Promise<void> {
+  await fetch(`/api/scores/${id}/publish`, { method: 'POST', ...opts });
+}
+
+export async function unpublishScore(id: string): Promise<void> {
+  await fetch(`/api/scores/${id}/unpublish`, { method: 'POST', ...opts });
 }

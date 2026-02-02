@@ -12,7 +12,9 @@ directory = "./dist"
 html_handling = "auto-trailing-slash"
 
 # Set via: wrangler secret put GOOGLE_CLIENT_SECRET
-# Set via: wrangler secret put RESEND_API_KEY
 [vars]
 GOOGLE_CLIENT_ID = "526761198377-b8f6rdlapmtp6chb39jrvb4297p05hpt.apps.googleusercontent.com"
 APP_URL = "https://riffmusic.app"
+
+[[send_email]]
+name = "SEND_EMAIL"

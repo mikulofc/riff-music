@@ -1,10 +1,9 @@
-import { getScore, saveScore } from '../api';
+import { getScore, saveScore, updateScore, type ScoreFull } from '../api';
 import { navigate } from '../router';
 import { loadFromFile, loadFromUrl, extractMusicXmlFromMxl, type LoadedScore } from '../music-xml-loader';
 import { renderScore, highlightPlayingNotes, highlightPlayingMeasure, scrollToPlayingNote, createScrollState, getNoteInfosFromIds } from '../sheet-renderer';
 import { createPianoKeyboard } from '../piano-keyboard';
 import { playNote, ensureAudioStarted, getPolySynth } from '../audio-player';
-import { addNoteLabels } from '../note-label-overlay';
 import { getToolkit } from '../verovio-init';
 import { MidiPlaybackController, type PlaybackState } from '../midi-playback';
 import * as Tone from 'tone';
@@ -19,7 +18,7 @@ export async function renderViewerPage(container: HTMLElement, scoreId: string):
     return;
   }
 
-  renderViewerUI(container, score.title, { data: score.musicxml, isCompressed: false });
+  renderViewerUI(container, score);
 }
 
 export function renderNewScorePage(container: HTMLElement): void {
@@ -31,6 +30,10 @@ export function renderNewScorePage(container: HTMLElement): void {
           <label for="file-input" class="file-label">
             <span>Upload MusicXML</span>
             <input type="file" id="file-input" accept=".musicxml,.xml,.mxl" />
+          </label>
+          <label for="bulk-input" class="file-label">
+            <span>Bulk Upload</span>
+            <input type="file" id="bulk-input" accept=".musicxml,.xml,.mxl" multiple webkitdirectory />
           </label>
         </div>
         <div class="input-group url-group">
@@ -66,6 +69,7 @@ export function renderNewScorePage(container: HTMLElement): void {
 
   let currentScore: LoadedScore | null = null;
   let currentMusicXmlText: string | null = null;
+  let currentAlbumImage: string | null = null;
   let playbackController: MidiPlaybackController | null = null;
   let currentKeySig: KeySignature = {};
   const scrollState = createScrollState(sheetContainer);
@@ -111,6 +115,39 @@ export function renderNewScorePage(container: HTMLElement): void {
         return score;
       });
     }
+  });
+
+  // Bulk upload
+  const bulkInput = document.getElementById('bulk-input') as HTMLInputElement;
+  bulkInput.addEventListener('change', async () => {
+    const files = Array.from(bulkInput.files || []).filter(
+      f => f.name.endsWith('.musicxml') || f.name.endsWith('.xml') || f.name.endsWith('.mxl'),
+    );
+    if (files.length === 0) return;
+
+    sheetContainer.innerHTML = `<div class="bulk-progress"><p>Uploading 0 / ${files.length} scores...</p></div>`;
+    let done = 0;
+
+    for (const file of files) {
+      try {
+        const loaded = await loadFromFile(file);
+        const xml = loaded.isCompressed
+          ? extractMusicXmlFromMxl(loaded.data as ArrayBuffer)
+          : loaded.data as string;
+        const meta = parseMusicXmlMetadata(xml);
+        const title = meta.title || file.name.replace(/\.(musicxml|xml|mxl)$/i, '');
+        await saveScore(title, xml);
+      } catch { /* skip failed files */ }
+      done++;
+      const p = sheetContainer.querySelector('.bulk-progress p');
+      if (p) p.textContent = `Uploading ${done} / ${files.length} scores...`;
+    }
+
+    sheetContainer.innerHTML = `<div class="bulk-progress"><p>Uploaded ${done} scores.</p><button id="bulk-done-btn" class="btn-primary">Go to Library</button></div>`;
+    document.getElementById('bulk-done-btn')!.addEventListener('click', () => {
+      playbackController?.dispose();
+      navigate('/library');
+    });
   });
 
   setupPlaybackButtons();
@@ -235,7 +272,6 @@ export function renderNewScorePage(container: HTMLElement): void {
     try {
       currentScore = await loader();
       currentKeySig = await renderScore(sheetContainer, currentScore, onNoteClick);
-      addNoteLabels(sheetContainer, currentKeySig);
       addSaveButton();
       const controls = document.getElementById('playback-controls');
       if (controls) controls.style.display = '';
@@ -249,6 +285,7 @@ export function renderNewScorePage(container: HTMLElement): void {
     document.getElementById('save-bar')?.remove();
 
     const meta = parseMusicXmlMetadata(currentMusicXmlText);
+    currentAlbumImage = null;
 
     const saveBar = document.createElement('div');
     saveBar.id = 'save-bar';
@@ -258,12 +295,31 @@ export function renderNewScorePage(container: HTMLElement): void {
         <input type="text" id="score-title" placeholder="Score title" value="${escapeAttr(meta.title)}" />
         <input type="text" id="score-composer" placeholder="Composer" value="${escapeAttr(meta.composer)}" />
         <input type="text" id="score-arranger" placeholder="Arranger" value="${escapeAttr(meta.arranger)}" />
+        <input type="text" id="score-album" placeholder="Album" value="${escapeAttr(meta.album)}" />
+      </div>
+      <div class="album-image-upload">
+        <label for="album-image-input" class="album-image-label" id="album-image-label" title="Upload album image">
+          <span class="album-image-placeholder">+</span>
+        </label>
+        <input type="file" id="album-image-input" accept="image/*" />
       </div>
       <button id="save-score-btn" class="btn-primary">Save to Library</button>
     `;
 
     const toolbar = container.querySelector('.viewer-toolbar');
     if (toolbar) toolbar.after(saveBar);
+
+    const albumImageInput = document.getElementById('album-image-input') as HTMLInputElement;
+    albumImageInput.addEventListener('change', () => {
+      const file = albumImageInput.files?.[0];
+      if (!file) return;
+      resizeImageToDataUrl(file, 300, (dataUrl) => {
+        currentAlbumImage = dataUrl;
+        const label = document.getElementById('album-image-label')!;
+        label.innerHTML = `<img src="${dataUrl}" class="album-image-preview" />`;
+        label.title = 'Change album image';
+      });
+    });
 
     document.getElementById('save-score-btn')!.addEventListener('click', async () => {
       const titleInput = document.getElementById('score-title') as HTMLInputElement;
@@ -273,14 +329,15 @@ export function renderNewScorePage(container: HTMLElement): void {
 
       const composer = (document.getElementById('score-composer') as HTMLInputElement).value.trim();
       const arranger = (document.getElementById('score-arranger') as HTMLInputElement).value.trim();
-      const updatedXml = updateMusicXmlMetadata(currentMusicXmlText, { title, composer, arranger });
+      const album = (document.getElementById('score-album') as HTMLInputElement).value.trim();
+      const updatedXml = updateMusicXmlMetadata(currentMusicXmlText, { title, composer, arranger, album });
 
       const btn = document.getElementById('save-score-btn') as HTMLButtonElement;
       btn.disabled = true;
       btn.textContent = 'Saving...';
 
       try {
-        const result = await saveScore(title, updatedXml);
+        const result = await saveScore(title, updatedXml, currentAlbumImage);
         playbackController?.dispose();
         navigate(`/viewer/${result.id}`);
       } catch {
@@ -291,12 +348,15 @@ export function renderNewScorePage(container: HTMLElement): void {
   }
 }
 
-function renderViewerUI(container: HTMLElement, title: string, score: LoadedScore): void {
+function renderViewerUI(container: HTMLElement, score: ScoreFull): void {
+  let editAlbumImage: string | null = score.album_image || null;
+
   container.innerHTML = `
     <div class="viewer-page">
       <div class="viewer-toolbar">
         <button id="back-btn">Back to Library</button>
-        <span class="viewer-title">${escapeHtml(title)}</span>
+        <span class="viewer-title">${escapeHtml(score.title)}</span>
+        <button id="edit-btn" class="btn-edit">Edit</button>
         <div class="playback-controls" id="playback-controls" style="display:none;">
           <button id="prev-note-btn" title="Previous note" class="btn-playback">&#9664;&#9664;</button>
           <button id="stop-btn" title="Stop" class="btn-playback btn-stop">&#9632;</button>
@@ -331,6 +391,75 @@ function renderViewerUI(container: HTMLElement, title: string, score: LoadedScor
   document.getElementById('back-btn')!.addEventListener('click', () => {
     playbackController?.dispose();
     navigate('/library');
+  });
+
+  // Edit button
+  const meta = parseMusicXmlMetadata(score.musicxml);
+  document.getElementById('edit-btn')!.addEventListener('click', () => {
+    const existing = document.getElementById('edit-bar');
+    if (existing) { existing.remove(); return; }
+
+    const editBar = document.createElement('div');
+    editBar.id = 'edit-bar';
+    editBar.className = 'save-bar';
+    editBar.innerHTML = `
+      <div class="album-image-upload">
+        <label for="edit-album-image-input" class="album-image-label" id="edit-album-image-label" title="Upload album image">
+          ${editAlbumImage
+            ? `<img src="${editAlbumImage}" class="album-image-preview" />`
+            : `<span class="album-image-placeholder">+</span>`
+          }
+        </label>
+        <input type="file" id="edit-album-image-input" accept="image/*" />
+      </div>
+      <div class="save-fields">
+        <input type="text" id="edit-title" placeholder="Title" value="${escapeAttr(score.title)}" />
+        <input type="text" id="edit-composer" placeholder="Composer" value="${escapeAttr(meta.composer)}" />
+        <input type="text" id="edit-arranger" placeholder="Arranger" value="${escapeAttr(meta.arranger)}" />
+        <input type="text" id="edit-album" placeholder="Album" value="${escapeAttr(meta.album)}" />
+      </div>
+      <button id="edit-save-btn" class="btn-primary">Save</button>
+      <button id="edit-cancel-btn">Cancel</button>
+    `;
+
+    const toolbar = container.querySelector('.viewer-toolbar');
+    if (toolbar) toolbar.after(editBar);
+
+    document.getElementById('edit-album-image-input')!.addEventListener('change', function (this: HTMLInputElement) {
+      const file = this.files?.[0];
+      if (!file) return;
+      resizeImageToDataUrl(file, 300, (dataUrl) => {
+        editAlbumImage = dataUrl;
+        const label = document.getElementById('edit-album-image-label')!;
+        label.innerHTML = `<img src="${dataUrl}" class="album-image-preview" />`;
+      });
+    });
+
+    document.getElementById('edit-cancel-btn')!.addEventListener('click', () => {
+      editBar.remove();
+    });
+
+    document.getElementById('edit-save-btn')!.addEventListener('click', async () => {
+      const title = (document.getElementById('edit-title') as HTMLInputElement).value.trim();
+      if (!title) return;
+      const composer = (document.getElementById('edit-composer') as HTMLInputElement).value.trim();
+      const arranger = (document.getElementById('edit-arranger') as HTMLInputElement).value.trim();
+      const album = (document.getElementById('edit-album') as HTMLInputElement).value.trim();
+      const updatedXml = updateMusicXmlMetadata(score.musicxml, { title, composer, arranger, album });
+
+      const btn = document.getElementById('edit-save-btn') as HTMLButtonElement;
+      btn.disabled = true;
+      btn.textContent = 'Saving...';
+
+      try {
+        await updateScore(score.id, { title, musicxml: updatedXml, album_image: editAlbumImage });
+        playbackController?.dispose();
+        navigate(`/viewer/${score.id}`);
+      } catch {
+        btn.disabled = false;
+        btn.textContent = 'Save';
+      }
+    });
   });
 
   function onNoteClick(noteInfo: NoteInfo, svgElement: SVGGElement): void {
@@ -427,9 +556,8 @@ function renderViewerUI(container: HTMLElement, title: string, score: LoadedScor
 
   setupPlaybackButtons();
 
-  renderScore(sheetContainer, score, onNoteClick).then((keySig) => {
+  renderScore(sheetContainer, { data: score.musicxml, isCompressed: false }, onNoteClick).then((keySig) => {
     scoreKeySig = keySig;
-    addNoteLabels(sheetContainer, keySig);
     const controls = document.getElementById('playback-controls');
     if (controls) controls.style.display = '';
   });
@@ -453,6 +581,7 @@ interface MusicXmlMetadata {
   title: string;
   composer: string;
   arranger: string;
+  album: string;
 }
 
 function parseMusicXmlMetadata(xml: string): MusicXmlMetadata {
@@ -464,11 +593,44 @@ function parseMusicXmlMetadata(xml: string): MusicXmlMetadata {
     const match = xml.match(new RegExp(`<creator[^>]+type="${type}"[^>]*>([^<]*)</creator>`));
     return match ? match[1] : '';
   };
+  const getMiscField = (name: string) => {
+    const match = xml.match(new RegExp(`<miscellaneous-field[^>]+name="${name}"[^>]*>([^<]*)</miscellaneous-field>`));
+    return match ? match[1] : '';
+  };
   return {
     title: getTag('work-title') || getTag('movement-title'),
     composer: getCreator('composer'),
     arranger: getCreator('arranger'),
+    album: getMiscField('album'),
   };
+}
+
+function resizeImageToDataUrl(file: File, maxSize: number, callback: (dataUrl: string) => void): void {
+  const reader = new FileReader();
+  reader.onload = () => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      let w = img.width;
+      let h = img.height;
+      if (w > maxSize || h > maxSize) {
+        if (w > h) {
+          h = Math.round((h / w) * maxSize);
+          w = maxSize;
+        } else {
+          w = Math.round((w / h) * maxSize);
+          h = maxSize;
+        }
+      }
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d')!;
+      ctx.drawImage(img, 0, 0, w, h);
+      callback(canvas.toDataURL('image/jpeg', 0.8));
+    };
+    img.src = reader.result as string;
+  };
+  reader.readAsDataURL(file);
 }
 
 function updateMusicXmlMetadata(xml: string, meta: MusicXmlMetadata): string {
@@ -498,6 +660,15 @@ function updateMusicXmlMetadata(xml: string, meta: MusicXmlMetadata): string {
     result = result.replace(/<creator([^>]+type="arranger"[^>]*)>[^<]*<\/creator>/, `<creator$1>${escapeXml(meta.arranger)}</creator>`);
   } else if (meta.arranger && result.includes('<identification>')) {
     result = result.replace(/<identification>/, `<identification>\n      <creator type="arranger">${escapeXml(meta.arranger)}</creator>`);
+  }
+
+  // Update or insert album (stored as miscellaneous-field)
+  if (result.match(/<miscellaneous-field[^>]+name="album"/)) {
+    result = result.replace(/<miscellaneous-field([^>]+name="album"[^>]*)>[^<]*<\/miscellaneous-field>/, `<miscellaneous-field$1>${escapeXml(meta.album)}</miscellaneous-field>`);
+  } else if (meta.album && result.includes('<miscellaneous>')) {
+    result = result.replace(/<miscellaneous>/, `<miscellaneous>\n        <miscellaneous-field name="album">${escapeXml(meta.album)}</miscellaneous-field>`);
+  } else if (meta.album && result.includes('<identification>')) {
+    result = result.replace(/<\/identification>/, `  <miscellaneous>\n        <miscellaneous-field name="album">${escapeXml(meta.album)}</miscellaneous-field>\n      </miscellaneous>\n    </identification>`);
   }
 
   return result;

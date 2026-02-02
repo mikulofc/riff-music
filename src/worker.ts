@@ -1,12 +1,13 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
+import { EmailMessage } from 'cloudflare:email';
 
 interface Env {
   DB: D1Database;
   GOOGLE_CLIENT_ID: string;
   GOOGLE_CLIENT_SECRET: string;
-  RESEND_API_KEY: string;
+  SEND_EMAIL: SendEmail;
   APP_URL: string;
 }
 
@@ -43,29 +44,32 @@ async function sendVerificationEmail(
   email: string,
   token: string,
   appUrl: string,
-  resendApiKey: string,
+  sendEmail: SendEmail,
 ): Promise<boolean> {
   const verifyUrl = `${appUrl}/api/auth/verify?token=${token}`;
+  const from = 'noreply@riffmusic.app';
+  const subject = 'Verify your email address';
+  const htmlBody = `
+    <h2>Welcome to Riff Music!</h2>
+    <p>Please verify your email address by clicking the link below:</p>
+    <p><a href="${verifyUrl}">Verify Email Address</a></p>
+    <p>This link will expire in 24 hours.</p>
+  `;
+
+  const rawEmail = [
+    `From: Riff Music <${from}>`,
+    `To: ${email}`,
+    `Subject: ${subject}`,
+    'MIME-Version: 1.0',
+    'Content-Type: text/html; charset=UTF-8',
+    '',
+    htmlBody,
+  ].join('\r\n');
+
   try {
-    const response = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${resendApiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        from: 'Riff Music <noreply@resend.dev>',
-        to: [email],
-        subject: 'Verify your email address',
-        html: `
-          <h2>Welcome to Riff Music!</h2>
-          <p>Please verify your email address by clicking the link below:</p>
-          <p><a href="${verifyUrl}">Verify Email Address</a></p>
-          <p>This link will expire in 24 hours.</p>
-        `,
-      }),
-    });
-    return response.ok;
+    const msg = new EmailMessage(from, email, rawEmail);
+    await sendEmail.send(msg);
+    return true;
   } catch {
     return false;
   }
@@ -120,8 +124,8 @@ app.post('/api/auth/register', async (c) => {
     .first();
 
   const appUrl = c.env.APP_URL || 'http://localhost:8787';
-  if (c.env.RESEND_API_KEY) {
-    await sendVerificationEmail(body.email, verificationToken, appUrl, c.env.RESEND_API_KEY);
+  if (c.env.SEND_EMAIL) {
+    await sendVerificationEmail(body.email, verificationToken, appUrl, c.env.SEND_EMAIL);
   }
 
   return c.json({ user: result, message: 'Please check your email to verify your account' }, 201);
@@ -370,7 +374,7 @@ app.get('/api/scores', async (c) => {
   if (!session) return c.json({ error: 'Not authenticated' }, 401);
 
   const scores = await c.env.DB.prepare(
-    'SELECT id, title, created_at FROM scores WHERE user_id = ? ORDER BY created_at DESC',
+    'SELECT id, title, album_image, created_at FROM scores WHERE user_id = ? ORDER BY created_at DESC',
   )
     .bind(session.user_id)
     .all();
@@ -382,30 +386,90 @@ app.post('/api/scores', async (c) => {
   const session = await getSessionUser(c);
   if (!session) return c.json({ error: 'Not authenticated' }, 401);
 
-  const body = await c.req.json<{ title: string; musicxml: string }>();
+  const body = await c.req.json<{ title: string; musicxml: string; album_image?: string }>();
   if (!body.title || !body.musicxml) {
     return c.json({ error: 'Title and musicxml are required' }, 400);
   }
 
   const id = generateId();
-  await c.env.DB.prepare('INSERT INTO scores (id, user_id, title, musicxml) VALUES (?, ?, ?, ?)')
-    .bind(id, session.user_id, body.title, body.musicxml)
+  await c.env.DB.prepare('INSERT INTO scores (id, user_id, title, musicxml, album_image) VALUES (?, ?, ?, ?, ?)')
+    .bind(id, session.user_id, body.title, body.musicxml, body.album_image || null)
     .run();
 
   return c.json({ id, title: body.title }, 201);
+});
+
+app.get('/api/scores/public', async (c) => {
+  const scores = await c.env.DB.prepare(
+    'SELECT s.id, s.title, s.album_image, s.created_at, u.name as user_name FROM scores s LEFT JOIN users u ON s.user_id = u.id WHERE s.is_public = 1 ORDER BY s.created_at DESC',
+  )
+    .all();
+
+  return c.json({ scores: scores.results });
 });
 
 app.get('/api/scores/:id', async (c) => {
   const session = await getSessionUser(c);
   if (!session) return c.json({ error: 'Not authenticated' }, 401);
 
-  const score = (await c.env.DB.prepare('SELECT id, title, musicxml, created_at FROM scores WHERE id = ? AND user_id = ?')
+  const score = (await c.env.DB.prepare('SELECT id, title, musicxml, album_image, created_at FROM scores WHERE id = ? AND user_id = ?')
     .bind(c.req.param('id'), session.user_id)
-    .first()) as { id: string; title: string; musicxml: string; created_at: string } | null;
+    .first()) as { id: string; title: string; musicxml: string; album_image: string | null; created_at: string } | null;
 
   if (!score) return c.json({ error: 'Score not found' }, 404);
 
   return c.json({ score });
+});
+
+app.post('/api/scores/:id/publish', async (c) => {
+  const session = await getSessionUser(c);
+  if (!session) return c.json({ error: 'Not authenticated' }, 401);
+
+  await c.env.DB.prepare('UPDATE scores SET is_public = 1 WHERE id = ? AND user_id = ?')
+    .bind(c.req.param('id'), session.user_id)
+    .run();
+
+  return c.json({ success: true });
+});
+
+app.post('/api/scores/:id/unpublish', async (c) => {
+  const session = await getSessionUser(c);
+  if (!session) return c.json({ error: 'Not authenticated' }, 401);
+
+  await c.env.DB.prepare('UPDATE scores SET is_public = 0 WHERE id = ? AND user_id = ?')
+    .bind(c.req.param('id'), session.user_id)
+    .run();
+
+  return c.json({ success: true });
+});
+
+app.put('/api/scores/:id', async (c) => {
+  const session = await getSessionUser(c);
+  if (!session) return c.json({ error: 'Not authenticated' }, 401);
+
+  const body = await c.req.json<{ title?: string; musicxml?: string; album_image?: string | null }>();
+  const id = c.req.param('id');
+
+  const existing = await c.env.DB.prepare('SELECT id FROM scores WHERE id = ? AND user_id = ?')
+    .bind(id, session.user_id)
+    .first();
+  if (!existing) return c.json({ error: 'Score not found' }, 404);
+
+  const updates: string[] = [];
+  const values: (string | null)[] = [];
+
+  if (body.title !== undefined) { updates.push('title = ?'); values.push(body.title); }
+  if (body.musicxml !== undefined) { updates.push('musicxml = ?'); values.push(body.musicxml); }
+  if (body.album_image !== undefined) { updates.push('album_image = ?'); values.push(body.album_image); }
+
+  if (updates.length === 0) return c.json({ error: 'No fields to update' }, 400);
+
+  values.push(id, session.user_id);
+  await c.env.DB.prepare(`UPDATE scores SET ${updates.join(', ')} WHERE id = ? AND user_id = ?`)
+    .bind(...values)
+    .run();
+
+  return c.json({ success: true });
 });
 
 app.delete('/api/scores/:id', async (c) => {
