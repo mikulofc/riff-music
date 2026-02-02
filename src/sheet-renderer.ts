@@ -20,31 +20,28 @@ export async function renderScore(
   const pageCount = tk.getPageCount();
   container.innerHTML = '';
 
-  // Parse key signature from MEI
+  // Parse key signature from MEI using regex (querySelector fails on namespaced XML)
   let keySig: KeySignature = {};
   try {
     const mei = tk.getMEI();
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(mei, 'text/xml');
-    // Try staffDef keySig attribute or keySig element
-    const staffDef = doc.querySelector('staffDef[key\\.sig], staffDef[keysig]');
-    const keySigAttr = staffDef?.getAttribute('key.sig') || staffDef?.getAttribute('keysig');
-    if (keySigAttr) {
-      const match = keySigAttr.match(/^(\d+)(s|f)$/);
+    let keySigValue: string | null = null;
+    // Try key.sig attribute on staffDef
+    const staffDefMatch = mei.match(/key\.sig="(\d+[sf])"/);
+    if (staffDefMatch) {
+      keySigValue = staffDefMatch[1];
+    }
+    // Try sig attribute on keySig element
+    if (!keySigValue) {
+      const keySigElMatch = mei.match(/<keySig[^>]*\ssig="(\d+[sf])"/);
+      if (keySigElMatch) {
+        keySigValue = keySigElMatch[1];
+      }
+    }
+    if (keySigValue) {
+      const match = keySigValue.match(/^(\d+)(s|f)$/);
       if (match) {
         const fifths = parseInt(match[1], 10) * (match[2] === 'f' ? -1 : 1);
         keySig = parseKeySignature(fifths);
-      }
-    }
-    if (!keySigAttr) {
-      const keySigEl = doc.querySelector('keySig[sig]');
-      const sig = keySigEl?.getAttribute('sig');
-      if (sig) {
-        const match = sig.match(/^(\d+)(s|f)$/);
-        if (match) {
-          const fifths = parseInt(match[1], 10) * (match[2] === 'f' ? -1 : 1);
-          keySig = parseKeySignature(fifths);
-        }
       }
     }
   } catch { /* proceed without key signature */ }
@@ -106,4 +103,87 @@ export async function renderScore(
   });
 
   return keySig;
+}
+
+export function getNoteInfosFromIds(container: HTMLElement, noteIds: string[], keySig: KeySignature): NoteInfo[] {
+  const results: NoteInfo[] = [];
+  for (const id of noteIds) {
+    const el = container.querySelector(`[id="${id}"]`) as SVGGElement | null;
+    if (!el) continue;
+    const pname = el.getAttribute('data-pname');
+    const oct = el.getAttribute('data-oct');
+    if (!pname || !oct) continue;
+
+    let accid = el.getAttribute('data-accid');
+    let accidGes = el.getAttribute('data-accid.ges');
+    if (!accid && !accidGes) {
+      const accidEl = el.querySelector('g.accid');
+      if (accidEl) {
+        accid = accidEl.getAttribute('data-accid');
+        accidGes = accidEl.getAttribute('data-accid.ges');
+      }
+    }
+
+    results.push(meiAttrToNoteInfo(pname, parseInt(oct, 10), accid || null, accidGes || null, keySig));
+  }
+  return results;
+}
+
+export function highlightPlayingNotes(container: HTMLElement, noteIds: string[]): void {
+  container.querySelectorAll('g.note.playing').forEach(el =>
+    el.classList.remove('playing'),
+  );
+  for (const id of noteIds) {
+    const el = container.querySelector(`[id="${id}"]`);
+    if (el) {
+      el.classList.add('playing');
+    }
+  }
+}
+
+export function highlightPlayingMeasure(container: HTMLElement, noteIds: string[]): void {
+  container.querySelectorAll('g.measure.playing-measure').forEach(el =>
+    el.classList.remove('playing-measure'),
+  );
+  const measures = new Set<Element>();
+  for (const id of noteIds) {
+    const el = container.querySelector(`[id="${id}"]`);
+    if (el) {
+      const measure = el.closest('g.measure');
+      if (measure) measures.add(measure);
+    }
+  }
+  measures.forEach(m => m.classList.add('playing-measure'));
+}
+
+export interface ScrollState {
+  userScrolledAt: number;
+  programmatic: boolean;
+}
+
+export function createScrollState(container: HTMLElement): ScrollState {
+  const state: ScrollState = { userScrolledAt: 0, programmatic: false };
+  container.addEventListener('scroll', () => {
+    if (!state.programmatic) {
+      state.userScrolledAt = Date.now();
+    }
+  });
+  return state;
+}
+
+export function scrollToPlayingNote(container: HTMLElement, noteIds: string[], scrollState?: ScrollState): void {
+  if (noteIds.length === 0) return;
+  if (scrollState && Date.now() - scrollState.userScrolledAt < 3000) return;
+
+  const el = container.querySelector(`[id="${noteIds[0]}"]`);
+  if (!el) return;
+
+  const containerRect = container.getBoundingClientRect();
+  const elRect = (el as Element).getBoundingClientRect();
+
+  if (elRect.top < containerRect.top || elRect.bottom > containerRect.bottom) {
+    if (scrollState) scrollState.programmatic = true;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (scrollState) requestAnimationFrame(() => { scrollState.programmatic = false; });
+  }
 }

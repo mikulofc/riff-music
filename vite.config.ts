@@ -13,7 +13,7 @@ export default defineConfig({
       output: {
         manualChunks: {
           verovio: ['verovio/wasm', 'verovio/esm'],
-          tone: ['tone'],
+          tone: ['tone', '@tonejs/midi'],
         },
       },
     },

@@ -41,7 +41,7 @@ export function addNoteLabels(container: HTMLElement, keySig?: KeySignature): vo
     label.setAttribute('text-anchor', 'middle');
     label.setAttribute('class', 'note-label');
     label.setAttribute('font-size', '200');
-    label.setAttribute('fill', '#4a90d9');
+    label.setAttribute('fill', '#7b5fbf');
     label.textContent = noteInfo.displayName;
 
     noteGroup.appendChild(label);

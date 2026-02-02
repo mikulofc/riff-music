@@ -1,6 +1,21 @@
+import { unzipSync, strFromU8 } from 'fflate';
+
 export interface LoadedScore {
   data: string | ArrayBuffer;
   isCompressed: boolean;
+}
+
+export function extractMusicXmlFromMxl(buffer: ArrayBuffer): string {
+  const unzipped = unzipSync(new Uint8Array(buffer));
+  for (const [name, data] of Object.entries(unzipped)) {
+    if (
+      name.endsWith('.musicxml') ||
+      (name.endsWith('.xml') && !name.includes('META-INF') && name !== 'container.xml')
+    ) {
+      return strFromU8(data);
+    }
+  }
+  throw new Error('No MusicXML file found in .mxl archive');
 }
 
 export async function loadFromFile(file: File): Promise<LoadedScore> {

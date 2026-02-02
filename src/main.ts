@@ -8,6 +8,30 @@ import './style.css';
 const app = document.getElementById('app')!;
 let currentUser: User | null = null;
 
+function initTheme() {
+  const saved = localStorage.getItem('theme');
+  if (saved === 'light') {
+    document.documentElement.setAttribute('data-theme', 'light');
+  }
+}
+
+function toggleTheme() {
+  const isLight = document.documentElement.getAttribute('data-theme') === 'light';
+  if (isLight) {
+    document.documentElement.removeAttribute('data-theme');
+    localStorage.setItem('theme', 'dark');
+  } else {
+    document.documentElement.setAttribute('data-theme', 'light');
+    localStorage.setItem('theme', 'light');
+  }
+  renderHeader();
+}
+
+function getThemeIcon(): string {
+  const isLight = document.documentElement.getAttribute('data-theme') === 'light';
+  return isLight ? '\u2600\uFE0F' : '\uD83C\uDF19';
+}
+
 function renderHeader() {
   let header = document.getElementById('app-header');
   if (!header) {
@@ -19,9 +43,10 @@ function renderHeader() {
   if (currentUser) {
     header.innerHTML = `
       <div class="header-inner">
-        <a href="#/library" class="header-brand">Riff Music</a>
+        <a href="#/library" class="header-brand"><img src="/logo.svg" alt="" class="header-logo" />Riff Music</a>
         <div class="header-user">
           <span class="header-email">${currentUser.email}</span>
+          <button class="theme-toggle" id="theme-toggle">${getThemeIcon()}</button>
           <button id="logout-btn">Logout</button>
         </div>
       </div>
@@ -32,12 +57,15 @@ function renderHeader() {
       renderHeader();
       navigate('/login');
     });
+    document.getElementById('theme-toggle')!.addEventListener('click', toggleTheme);
   } else {
     header.innerHTML = `
       <div class="header-inner">
-        <span class="header-brand">Riff Music</span>
+        <span class="header-brand"><img src="/logo.svg" alt="" class="header-logo" />Riff Music</span>
+        <button class="theme-toggle" id="theme-toggle">${getThemeIcon()}</button>
       </div>
     `;
+    document.getElementById('theme-toggle')!.addEventListener('click', toggleTheme);
   }
 }
 
@@ -84,6 +112,7 @@ addRoute('/new', requireAuth(() => {
 }));
 
 async function init() {
+  initTheme();
   currentUser = await getCurrentUser();
   renderHeader();
   startRouter();

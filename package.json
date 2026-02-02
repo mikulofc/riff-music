@@ -19,6 +19,8 @@
     "wrangler": "^4.61.1"
   },
   "dependencies": {
+    "@tonejs/midi": "^2.0.28",
+    "fflate": "^0.8.2",
     "hono": "^4.11.7",
     "tone": "^15.1.22",
     "verovio": "^6.0.1"

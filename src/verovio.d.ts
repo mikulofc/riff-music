@@ -13,6 +13,9 @@ declare module 'verovio/esm' {
     renderToSVG(page?: number, xmlDeclaration?: boolean): string;
     getElementAttr(xmlId: string): Record<string, string>;
     getMEI(options?: Record<string, any>): string;
+    renderToMIDI(): string;
+    getTimeForElement(xmlId: string): number;
+    getElementsAtTime(millisec: number): { notes: string[]; page: number };
     destroy(): void;
   }
 }

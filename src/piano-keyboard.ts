@@ -89,9 +89,18 @@ export function createPianoKeyboard(container: HTMLElement) {
     if (key) key.classList.add('active');
   }
 
+  function highlightKeys(notes: NoteInfo[]) {
+    clearHighlight();
+    for (const note of notes) {
+      const normalizedName = normalizeToSharp(note.displayName) + note.octave;
+      const key = svg.querySelector(`[data-note="${normalizedName}"]`);
+      if (key) key.classList.add('active');
+    }
+  }
+
   function clearHighlight() {
     svg.querySelectorAll('.active').forEach((el) => el.classList.remove('active'));
   }
 
-  return { highlightKey, clearHighlight };
+  return { highlightKey, highlightKeys, clearHighlight };
 }

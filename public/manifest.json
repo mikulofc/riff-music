@@ -1,0 +1,22 @@
+{
+  "name": "Riff Music",
+  "short_name": "Riff",
+  "description": "View and interact with sheet music",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#141420",
+  "theme_color": "#141420",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "/logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    },
+    {
+      "src": "/favicon.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    }
+  ]
+}
