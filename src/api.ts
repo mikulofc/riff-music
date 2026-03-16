@@ -13,6 +13,7 @@ export interface ScoreSummary {
 
 export interface ScoreFull extends ScoreSummary {
   musicxml: string;
+  user_id: string;
 }
 
 const headers = { 'Content-Type': 'application/json' };

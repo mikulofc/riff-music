@@ -35,6 +35,8 @@ CREATE TABLE IF NOT EXISTS scores (
     user_id TEXT NOT NULL,
     title TEXT NOT NULL,
     musicxml TEXT NOT NULL,
+    album_image TEXT,
+    is_public INTEGER DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
@@ -46,3 +48,4 @@ CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token);
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_oauth_states_expires ON oauth_states(expires_at);
 CREATE INDEX IF NOT EXISTS idx_scores_user ON scores(user_id);
+CREATE INDEX IF NOT EXISTS idx_scores_public ON scores(is_public);

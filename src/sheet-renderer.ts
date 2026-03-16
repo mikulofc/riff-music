@@ -2,7 +2,7 @@ import { getToolkit } from './verovio-init';
 import { meiAttrToNoteInfo, parseKeySignature, type NoteInfo, type KeySignature } from './note-data';
 import type { LoadedScore } from './music-xml-loader';
 
-export type NoteClickCallback = (noteInfo: NoteInfo, svgElement: SVGGElement) => void;
+export type NoteClickCallback = (noteInfos: NoteInfo[], svgElements: SVGGElement[]) => void;
 
 export async function renderScore(
   container: HTMLElement,
@@ -58,48 +58,64 @@ export async function renderScore(
     const noteGroup = target.closest('g.note') as SVGGElement | null;
     if (!noteGroup) return;
 
-    const pname = noteGroup.getAttribute('data-pname');
-    const oct = noteGroup.getAttribute('data-oct');
-    let accid = noteGroup.getAttribute('data-accid');
-    let accidGes = noteGroup.getAttribute('data-accid.ges');
+    // Collect all notes: if this note is inside a chord, grab all sibling notes
+    const chordGroup = noteGroup.closest('g.chord');
+    const noteGroups: SVGGElement[] = chordGroup
+      ? Array.from(chordGroup.querySelectorAll(':scope > g.note'))
+      : [noteGroup];
 
-    // Check child accid element (Verovio stores explicit accidentals as child elements)
-    if (!accid && !accidGes) {
-      const accidEl = noteGroup.querySelector('g.accid');
-      if (accidEl) {
-        accid = accidEl.getAttribute('data-accid');
-        accidGes = accidEl.getAttribute('data-accid.ges');
+    const noteInfos: NoteInfo[] = [];
+    const svgElements: SVGGElement[] = [];
+
+    for (const ng of noteGroups) {
+      const pname = ng.getAttribute('data-pname');
+      const oct = ng.getAttribute('data-oct');
+      let accid = ng.getAttribute('data-accid');
+      let accidGes = ng.getAttribute('data-accid.ges');
+
+      // Check child accid element (Verovio stores explicit accidentals as child elements)
+      if (!accid && !accidGes) {
+        const accidEl = ng.querySelector('g.accid');
+        if (accidEl) {
+          accid = accidEl.getAttribute('data-accid');
+          accidGes = accidEl.getAttribute('data-accid.ges');
+        }
       }
+
+      // Last resort: try Verovio's MEI attributes directly
+      if (!accid && !accidGes) {
+        const noteId = ng.getAttribute('id');
+        if (noteId) {
+          try {
+            const attrs = tk.getElementAttr(noteId);
+            if (attrs['accid.ges']) accidGes = attrs['accid.ges'];
+            if (attrs['accid']) accid = attrs['accid'];
+          } catch { /* proceed without */ }
+        }
+      }
+
+      if (!pname || !oct) continue;
+
+      noteInfos.push(meiAttrToNoteInfo(
+        pname,
+        parseInt(oct, 10),
+        accid || null,
+        accidGes || null,
+        keySig,
+      ));
+      svgElements.push(ng);
     }
 
-    // Last resort: try Verovio's MEI attributes directly
-    if (!accid && !accidGes) {
-      const noteId = noteGroup.getAttribute('id');
-      if (noteId) {
-        try {
-          const attrs = tk.getElementAttr(noteId);
-          if (attrs['accid.ges']) accidGes = attrs['accid.ges'];
-          if (attrs['accid']) accid = attrs['accid'];
-        } catch { /* proceed without */ }
-      }
-    }
-
-    if (!pname || !oct) return;
-
-    const noteInfo = meiAttrToNoteInfo(
-      pname,
-      parseInt(oct, 10),
-      accid || null,
-      accidGes || null,
-      keySig,
-    );
+    if (noteInfos.length === 0) return;
 
     container.querySelectorAll('g.note.selected').forEach((el) =>
       el.classList.remove('selected'),
     );
-    noteGroup.classList.add('selected');
+    for (const ng of svgElements) {
+      ng.classList.add('selected');
+    }
 
-    onNoteClick(noteInfo, noteGroup);
+    onNoteClick(noteInfos, svgElements);
   });
 
   return keySig;

@@ -16,7 +16,7 @@
     "vite": "^7.2.4",
     "vite-plugin-top-level-await": "^1.6.0",
     "vite-plugin-wasm": "^3.5.0",
-    "wrangler": "^4.61.1"
+    "wrangler": "^4.65.0"
   },
   "dependencies": {
     "@tonejs/midi": "^2.0.28",

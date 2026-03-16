@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import type { Context } from 'hono';
 import { cors } from 'hono/cors';
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import { EmailMessage } from 'cloudflare:email';
@@ -17,6 +18,8 @@ interface User {
   name: string | null;
 }
 
+type AppContext = Context<{ Bindings: Env }>;
+
 const app = new Hono<{ Bindings: Env }>();
 
 app.use('/api/*', cors());
@@ -33,11 +36,47 @@ function generateToken(): string {
   return Array.from(array, (b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-async function hashPassword(password: string): Promise<string> {
+async function hashPassword(password: string, salt?: string): Promise<string> {
   const encoder = new TextEncoder();
-  const data = encoder.encode(password);
-  const hash = await crypto.subtle.digest('SHA-256', data);
-  return Array.from(new Uint8Array(hash), (b) => b.toString(16).padStart(2, '0')).join('');
+  const passwordData = encoder.encode(password);
+
+  // Generate or use existing salt
+  const saltBytes = salt
+    ? Uint8Array.from(salt.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16)))
+    : crypto.getRandomValues(new Uint8Array(16));
+
+  // Use PBKDF2 with 100,000 iterations for security
+  const keyMaterial = await crypto.subtle.importKey(
+    'raw',
+    passwordData,
+    'PBKDF2',
+    false,
+    ['deriveBits']
+  );
+
+  const derivedBits = await crypto.subtle.deriveBits(
+    {
+      name: 'PBKDF2',
+      salt: saltBytes,
+      iterations: 100000,
+      hash: 'SHA-256'
+    },
+    keyMaterial,
+    256
+  );
+
+  const hashBytes = new Uint8Array(derivedBits);
+  const saltHex = Array.from(saltBytes, (b) => b.toString(16).padStart(2, '0')).join('');
+  const hashHex = Array.from(hashBytes, (b) => b.toString(16).padStart(2, '0')).join('');
+
+  // Return salt:hash format
+  return `${saltHex}:${hashHex}`;
+}
+
+async function verifyPassword(password: string, storedHash: string): Promise<boolean> {
+  const [salt] = storedHash.split(':');
+  const newHash = await hashPassword(password, salt);
+  return newHash === storedHash;
 }
 
 async function sendVerificationEmail(
@@ -75,7 +114,7 @@ async function sendVerificationEmail(
   }
 }
 
-async function getSessionUser(c: any): Promise<{ user_id: string } | null> {
+async function getSessionUser(c: AppContext): Promise<{ user_id: string } | null> {
   const sessionToken = getCookie(c, 'session');
   if (!sessionToken) return null;
 
@@ -163,14 +202,21 @@ app.post('/api/auth/login', async (c) => {
     return c.json({ error: 'Email and password are required' }, 400);
   }
 
-  const passwordHash = await hashPassword(body.password);
   const user = (await c.env.DB.prepare(
-    'SELECT id, email, name, email_verified FROM users WHERE email = ? AND password_hash = ?',
+    'SELECT id, email, name, email_verified, password_hash FROM users WHERE email = ?',
   )
-    .bind(body.email.toLowerCase(), passwordHash)
-    .first()) as (User & { email_verified: number }) | null;
+    .bind(body.email.toLowerCase())
+    .first()) as (User & { email_verified: number; password_hash: string | null }) | null;
 
-  if (!user) return c.json({ error: 'Invalid email or password' }, 401);
+  if (!user || !user.password_hash) {
+    return c.json({ error: 'Invalid email or password' }, 401);
+  }
+
+  const isValid = await verifyPassword(body.password, user.password_hash);
+  if (!isValid) {
+    return c.json({ error: 'Invalid email or password' }, 401);
+  }
+
   if (!user.email_verified) {
     return c.json({ error: 'Please verify your email before logging in' }, 401);
   }
@@ -412,9 +458,12 @@ app.get('/api/scores/:id', async (c) => {
   const session = await getSessionUser(c);
   if (!session) return c.json({ error: 'Not authenticated' }, 401);
 
-  const score = (await c.env.DB.prepare('SELECT id, title, musicxml, album_image, created_at FROM scores WHERE id = ? AND user_id = ?')
+  // Allow access to user's own scores OR public scores
+  const score = (await c.env.DB.prepare(
+    'SELECT id, title, musicxml, album_image, created_at, user_id FROM scores WHERE id = ? AND (user_id = ? OR is_public = 1)'
+  )
     .bind(c.req.param('id'), session.user_id)
-    .first()) as { id: string; title: string; musicxml: string; album_image: string | null; created_at: string } | null;
+    .first()) as { id: string; title: string; musicxml: string; album_image: string | null; created_at: string; user_id: string } | null;
 
   if (!score) return c.json({ error: 'Score not found' }, 404);
 
@@ -455,12 +504,23 @@ app.put('/api/scores/:id', async (c) => {
     .first();
   if (!existing) return c.json({ error: 'Score not found' }, 404);
 
+  // Whitelist of allowed fields to prevent SQL injection
+  const allowedFields = ['title', 'musicxml', 'album_image'] as const;
   const updates: string[] = [];
   const values: (string | null)[] = [];
 
-  if (body.title !== undefined) { updates.push('title = ?'); values.push(body.title); }
-  if (body.musicxml !== undefined) { updates.push('musicxml = ?'); values.push(body.musicxml); }
-  if (body.album_image !== undefined) { updates.push('album_image = ?'); values.push(body.album_image); }
+  if (body.title !== undefined && allowedFields.includes('title')) {
+    updates.push('title = ?');
+    values.push(body.title);
+  }
+  if (body.musicxml !== undefined && allowedFields.includes('musicxml')) {
+    updates.push('musicxml = ?');
+    values.push(body.musicxml);
+  }
+  if (body.album_image !== undefined && allowedFields.includes('album_image')) {
+    updates.push('album_image = ?');
+    values.push(body.album_image);
+  }
 
   if (updates.length === 0) return c.json({ error: 'No fields to update' }, 400);
 

@@ -1,4 +1,4 @@
-import { getScore, saveScore, updateScore, type ScoreFull } from '../api';
+import { getScore, saveScore, updateScore, getCurrentUser, type ScoreFull } from '../api';
 import { navigate } from '../router';
 import { loadFromFile, loadFromUrl, extractMusicXmlFromMxl, type LoadedScore } from '../music-xml-loader';
 import { renderScore, highlightPlayingNotes, highlightPlayingMeasure, scrollToPlayingNote, createScrollState, getNoteInfosFromIds } from '../sheet-renderer';
@@ -18,7 +18,7 @@ export async function renderViewerPage(container: HTMLElement, scoreId: string):
     return;
   }
 
-  renderViewerUI(container, score);
+  await renderViewerUI(container, score);
 }
 
 export function renderNewScorePage(container: HTMLElement): void {
@@ -171,28 +171,31 @@ export function renderNewScorePage(container: HTMLElement): void {
     }
   });
 
-  function onNoteClick(noteInfo: NoteInfo, svgElement: SVGGElement): void {
-    infoPanel.innerHTML = `
-      <h2>Note Info</h2>
+  function onNoteClick(noteInfos: NoteInfo[], svgElements: SVGGElement[]): void {
+    const notesHtml = noteInfos.map(n => `
       <div class="note-detail">
-        <span class="note-name">${noteInfo.displayName}${noteInfo.octave}</span>
+        <span class="note-name">${n.displayName}${n.octave}</span>
         <table>
-          <tr><td>Pitch</td><td>${noteInfo.pitchClass}</td></tr>
-          <tr><td>Accidental</td><td>${noteInfo.accidental || 'Natural'}</td></tr>
-          <tr><td>Octave</td><td>${noteInfo.octave}</td></tr>
-          <tr><td>MIDI #</td><td>${noteInfo.midiNote}</td></tr>
+          <tr><td>Pitch</td><td>${n.pitchClass}</td></tr>
+          <tr><td>Accidental</td><td>${n.accidental || 'Natural'}</td></tr>
+          <tr><td>Octave</td><td>${n.octave}</td></tr>
+          <tr><td>MIDI #</td><td>${n.midiNote}</td></tr>
         </table>
       </div>
+    `).join('');
+    infoPanel.innerHTML = `
+      <h2>Note Info${noteInfos.length > 1 ? ` (${noteInfos.length} notes)` : ''}</h2>
+      ${notesHtml}
     `;
-    piano.highlightKey(noteInfo);
+    piano.highlightKeys(noteInfos);
 
     if (playbackController && Tone.getTransport().state !== 'stopped') {
-      const noteId = svgElement.getAttribute('id');
+      const noteId = svgElements[0].getAttribute('id');
       if (noteId) {
         playbackController.seekToElement(noteId);
       }
     } else {
-      playNote(noteInfo);
+      for (const n of noteInfos) playNote(n);
     }
   }
 
@@ -313,7 +316,7 @@ export function renderNewScorePage(container: HTMLElement): void {
     albumImageInput.addEventListener('change', () => {
       const file = albumImageInput.files?.[0];
       if (!file) return;
-      resizeImageToDataUrl(file, 300, (dataUrl) => {
+      resizeImageToDataUrl(file, 500, (dataUrl) => {
         currentAlbumImage = dataUrl;
         const label = document.getElementById('album-image-label')!;
         label.innerHTML = `<img src="${dataUrl}" class="album-image-preview" />`;
@@ -348,15 +351,19 @@ export function renderNewScorePage(container: HTMLElement): void {
   }
 }
 
-function renderViewerUI(container: HTMLElement, score: ScoreFull): void {
+async function renderViewerUI(container: HTMLElement, score: ScoreFull): Promise<void> {
   let editAlbumImage: string | null = score.album_image || null;
+
+  // Check if current user owns this score
+  const currentUser = await getCurrentUser();
+  const canEdit = currentUser && currentUser.id === score.user_id;
 
   container.innerHTML = `
     <div class="viewer-page">
       <div class="viewer-toolbar">
         <button id="back-btn">Back to Library</button>
         <span class="viewer-title">${escapeHtml(score.title)}</span>
-        <button id="edit-btn" class="btn-edit">Edit</button>
+        ${canEdit ? '<button id="edit-btn" class="btn-edit">Edit</button>' : ''}
         <div class="playback-controls" id="playback-controls" style="display:none;">
           <button id="prev-note-btn" title="Previous note" class="btn-playback">&#9664;&#9664;</button>
           <button id="stop-btn" title="Stop" class="btn-playback btn-stop">&#9632;</button>
@@ -393,9 +400,10 @@ function renderViewerUI(container: HTMLElement, score: ScoreFull): void {
     navigate('/library');
   });
 
-  // Edit button
-  const meta = parseMusicXmlMetadata(score.musicxml);
-  document.getElementById('edit-btn')!.addEventListener('click', () => {
+  // Edit button (only if user owns the score)
+  if (canEdit) {
+    const meta = parseMusicXmlMetadata(score.musicxml);
+    document.getElementById('edit-btn')!.addEventListener('click', () => {
     const existing = document.getElementById('edit-bar');
     if (existing) { existing.remove(); return; }
 
@@ -428,7 +436,7 @@ function renderViewerUI(container: HTMLElement, score: ScoreFull): void {
     document.getElementById('edit-album-image-input')!.addEventListener('change', function (this: HTMLInputElement) {
       const file = this.files?.[0];
       if (!file) return;
-      resizeImageToDataUrl(file, 300, (dataUrl) => {
+      resizeImageToDataUrl(file, 500, (dataUrl) => {
         editAlbumImage = dataUrl;
         const label = document.getElementById('edit-album-image-label')!;
         label.innerHTML = `<img src="${dataUrl}" class="album-image-preview" />`;
@@ -455,35 +463,40 @@ function renderViewerUI(container: HTMLElement, score: ScoreFull): void {
         await updateScore(score.id, { title, musicxml: updatedXml, album_image: editAlbumImage });
         playbackController?.dispose();
         navigate(`/viewer/${score.id}`);
-      } catch {
+      } catch (error) {
         btn.disabled = false;
         btn.textContent = 'Save';
+        alert('Failed to save changes. You may not have permission to edit this score.');
       }
     });
   });
+  }
 
-  function onNoteClick(noteInfo: NoteInfo, svgElement: SVGGElement): void {
-    infoPanel.innerHTML = `
-      <h2>Note Info</h2>
+  function onNoteClick(noteInfos: NoteInfo[], svgElements: SVGGElement[]): void {
+    const notesHtml = noteInfos.map(n => `
       <div class="note-detail">
-        <span class="note-name">${noteInfo.displayName}${noteInfo.octave}</span>
+        <span class="note-name">${n.displayName}${n.octave}</span>
         <table>
-          <tr><td>Pitch</td><td>${noteInfo.pitchClass}</td></tr>
-          <tr><td>Accidental</td><td>${noteInfo.accidental || 'Natural'}</td></tr>
-          <tr><td>Octave</td><td>${noteInfo.octave}</td></tr>
-          <tr><td>MIDI #</td><td>${noteInfo.midiNote}</td></tr>
+          <tr><td>Pitch</td><td>${n.pitchClass}</td></tr>
+          <tr><td>Accidental</td><td>${n.accidental || 'Natural'}</td></tr>
+          <tr><td>Octave</td><td>${n.octave}</td></tr>
+          <tr><td>MIDI #</td><td>${n.midiNote}</td></tr>
         </table>
       </div>
+    `).join('');
+    infoPanel.innerHTML = `
+      <h2>Note Info${noteInfos.length > 1 ? ` (${noteInfos.length} notes)` : ''}</h2>
+      ${notesHtml}
     `;
-    piano.highlightKey(noteInfo);
+    piano.highlightKeys(noteInfos);
 
     if (playbackController && Tone.getTransport().state !== 'stopped') {
-      const noteId = svgElement.getAttribute('id');
+      const noteId = svgElements[0].getAttribute('id');
       if (noteId) {
         playbackController.seekToElement(noteId);
       }
     } else {
-      playNote(noteInfo);
+      for (const n of noteInfos) playNote(n);
     }
   }
 
@@ -611,22 +624,22 @@ function resizeImageToDataUrl(file: File, maxSize: number, callback: (dataUrl: s
     const img = new Image();
     img.onload = () => {
       const canvas = document.createElement('canvas');
-      let w = img.width;
-      let h = img.height;
-      if (w > maxSize || h > maxSize) {
-        if (w > h) {
-          h = Math.round((h / w) * maxSize);
-          w = maxSize;
-        } else {
-          w = Math.round((w / h) * maxSize);
-          h = maxSize;
-        }
-      }
-      canvas.width = w;
-      canvas.height = h;
+
+      // Always create a square canvas for album art
+      canvas.width = maxSize;
+      canvas.height = maxSize;
+
       const ctx = canvas.getContext('2d')!;
-      ctx.drawImage(img, 0, 0, w, h);
-      callback(canvas.toDataURL('image/jpeg', 0.8));
+
+      // Calculate dimensions to crop to square (center crop)
+      const size = Math.min(img.width, img.height);
+      const x = (img.width - size) / 2;
+      const y = (img.height - size) / 2;
+
+      // Draw cropped and scaled image
+      ctx.drawImage(img, x, y, size, size, 0, 0, maxSize, maxSize);
+
+      callback(canvas.toDataURL('image/jpeg', 0.85));
     };
     img.src = reader.result as string;
   };
